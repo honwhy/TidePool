@@ -1,0 +1,72 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<project xmlns="http://maven.apache.org/POM/4.0.0"
+         xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance"
+         xsi:schemaLocation="http://maven.apache.org/POM/4.0.0 https://maven.apache.org/xsd/maven-4.0.0.xsd">
+
+    <modelVersion>4.0.0</modelVersion>
+
+    <parent>
+        <groupId>io.ftppool</groupId>
+        <artifactId>ftp-pool</artifactId>
+        <version>0.1.0-SNAPSHOT</version>
+        <relativePath>../pom.xml</relativePath>
+    </parent>
+
+    <artifactId>ftp-pool-tests</artifactId>
+    <name>FtpPool Integration Tests</name>
+    <description>Failure tests, concurrency tests, and integration tests against Apache MINA FTP Server.</description>
+
+    <properties>
+        <!-- Default: unit-only. Overridable at the CLI, e.g.
+             ./mvnw.cmd -pl ftp-pool-tests test -Dftppool.test.groups=integration -Dftppool.test.excludedGroups=
+             (hard-coding excludedGroups here would make surefire's exclusion-win
+              behaviour veto any attempt to include the integration tag on the CLI). -->
+        <ftppool.test.groups>unit</ftppool.test.groups>
+        <ftppool.test.excludedGroups>integration</ftppool.test.excludedGroups>
+    </properties>
+
+    <dependencies>
+        <dependency>
+            <groupId>io.ftppool</groupId>
+            <artifactId>ftp-pool-api</artifactId>
+        </dependency>
+        <dependency>
+            <groupId>io.ftppool</groupId>
+            <artifactId>ftp-pool-core</artifactId>
+        </dependency>
+        <dependency>
+            <groupId>io.ftppool</groupId>
+            <artifactId>ftp-pool-adapter</artifactId>
+        </dependency>
+        <dependency>
+            <groupId>io.ftppool</groupId>
+            <artifactId>ftp-pool-engine-fast</artifactId>
+        </dependency>
+        <dependency>
+            <groupId>io.ftppool</groupId>
+            <artifactId>ftp-pool-engine-commons</artifactId>
+        </dependency>
+        <dependency>
+            <groupId>io.ftppool</groupId>
+            <artifactId>ftp-pool-observability</artifactId>
+        </dependency>
+        <dependency>
+            <groupId>org.apache.ftpserver</groupId>
+            <artifactId>ftpserver-core</artifactId>
+            <scope>test</scope>
+        </dependency>
+    </dependencies>
+
+    <build>
+        <plugins>
+            <plugin>
+                <groupId>org.apache.maven.plugins</groupId>
+                <artifactId>maven-surefire-plugin</artifactId>
+                <configuration>
+                    <groups>${ftppool.test.groups}</groups>
+                    <excludedGroups>${ftppool.test.excludedGroups}</excludedGroups>
+                </configuration>
+            </plugin>
+        </plugins>
+    </build>
+</project>

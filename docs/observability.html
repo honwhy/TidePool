@@ -1,0 +1,174 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>可观测性 · TidePool</title>
+<link rel="stylesheet" href="assets/style.css">
+</head>
+<body data-page="observability">
+<header id="site-header"></header>
+
+<div class="layout">
+<aside id="toc"></aside>
+<main class="content">
+
+<h1>可观测性</h1>
+
+<p>可观测性是三个独立策略轴之一（<code>ObservabilityType.NONE / BASIC / FULL</code>）。
+FtpPool 提供四条观测通道：编程式统计、Micrometer 指标、JMX、结构化日志。</p>
+
+<h2>1. 编程式统计 FtpPoolStats</h2>
+
+<pre><code>FtpPoolStats s = pool.stats();
+int total   = s.total();               // 总连接数（空闲 + 借出）
+int active  = s.active();              // 当前借出
+int idle    = s.idle();                // 当前空闲
+int pending = s.pending();             // 正在等待连接的 borrower 数
+long created = s.created();
+long destroyed = s.destroyed();
+long borrowed = s.borrowed();
+long returned = s.returned();
+long borrowTimeouts = s.borrowTimeouts();
+long validationFailures = s.validationFailures();
+</code></pre>
+
+<p>统计快照轻量、无副作用，可安全地在健康检查或自定义监控线程中调用。</p>
+
+<h2>2. Micrometer 指标</h2>
+
+<p>需要 <code>ftp-pool-micrometer</code>。Spring Boot 下存在 <code>MeterRegistry</code> Bean 时自动接入。</p>
+
+<h3>池级指标</h3>
+
+<table>
+<thead><tr><th>指标名</th><th>类型</th><th>来源</th></tr></thead>
+<tbody>
+<tr><td><code>ftp.pool.size</code></td><td>Gauge</td><td><code>stats.total()</code></td></tr>
+<tr><td><code>ftp.pool.active</code></td><td>Gauge</td><td><code>stats.active()</code></td></tr>
+<tr><td><code>ftp.pool.idle</code></td><td>Gauge</td><td><code>stats.idle()</code></td></tr>
+<tr><td><code>ftp.pool.pending</code></td><td>Gauge</td><td><code>stats.pending()</code></td></tr>
+<tr><td><code>ftp.pool.borrow</code></td><td>Counter</td><td>累计借出</td></tr>
+<tr><td><code>ftp.pool.borrow.timeout</code></td><td>Counter</td><td>借出超时</td></tr>
+<tr><td><code>ftp.pool.create</code></td><td>Counter</td><td>累计创建</td></tr>
+<tr><td><code>ftp.pool.destroy</code></td><td>Counter</td><td>累计销毁</td></tr>
+<tr><td><code>ftp.pool.validation.failure</code></td><td>Counter</td><td>校验失败</td></tr>
+</tbody>
+</table>
+
+<h3>操作级指标</h3>
+
+<table>
+<thead><tr><th>指标名</th><th>类型</th><th>标签</th></tr></thead>
+<tbody>
+<tr><td><code>ftp.operation.&lt;op&gt;</code></td><td>Counter</td><td><code>result=success|failure</code></td></tr>
+<tr><td><code>ftp.operation.latency</code></td><td>Timer</td><td><code>operation=&lt;op&gt;</code></td></tr>
+<tr><td><code>ftp.operation.bytes</code></td><td>Counter</td><td><code>operation=&lt;op&gt;</code>（仅传输类操作）</td></tr>
+<tr><td><code>ftp.operation.slow</code></td><td>Counter</td><td>超过慢操作阈值的次数</td></tr>
+</tbody>
+</table>
+
+<p><code>&lt;op&gt;</code> 取值来自 <code>FtpOperation</code>（小写），如
+<code>borrow</code>、<code>execute</code>、<code>upload</code>、<code>download</code>、<code>delete</code>、<code>list</code>、
+<code>rename</code>、<code>make_directory</code>、<code>change_directory</code>、<code>connect</code>、<code>login</code>、
+<code>validate</code>、<code>reset</code>、<code>return</code>、<code>complete_pending</code>。</p>
+
+<blockquote class="warn">
+  <p><strong>无高基数标签：</strong>用户名、文件路径、完整 FTP 命令永远不会成为指标标签。
+  默认标签只有 <code>pool</code>（以及 Spring Boot 场景下的 <code>host</code> / <code>port</code> / <code>protocol</code>）。</p>
+</blockquote>
+
+<h2>3. JMX</h2>
+
+<p>需要 <code>ftp-pool-jmx</code>。编程式构建时默认自动注册；Spring Boot 下由 <code>spring.tidepool.ftp.observability.jmx</code> 控制。</p>
+
+<p>对象名：</p>
+
+<pre><code>com.ftppool:type=FtpPool,name=&lt;poolName&gt;
+</code></pre>
+
+<h3>只读属性</h3>
+
+<table>
+<thead><tr><th>属性</th><th>含义</th></tr></thead>
+<tbody>
+<tr><td><code>PoolName</code></td><td>池名</td></tr>
+<tr><td><code>Total</code> / <code>Active</code> / <code>Idle</code> / <code>Pending</code></td><td>实时连接数</td></tr>
+<tr><td><code>BorrowCount</code> / <code>ReturnCount</code></td><td>累计借出 / 归还</td></tr>
+<tr><td><code>BorrowTimeoutCount</code></td><td>累计借出超时</td></tr>
+<tr><td><code>CreateCount</code> / <code>DestroyCount</code></td><td>累计创建 / 销毁</td></tr>
+<tr><td><code>ValidationFailureCount</code></td><td>累计校验失败</td></tr>
+</tbody>
+</table>
+
+<h3>操作</h3>
+
+<table>
+<thead><tr><th>操作</th><th>作用</th></tr></thead>
+<tbody>
+<tr><td><code>clearIdle()</code></td><td>销毁所有空闲连接</td></tr>
+<tr><td><code>validateAll()</code></td><td>校验所有空闲连接，销毁无效的</td></tr>
+<tr><td><code>shutdown()</code></td><td>关闭整个池</td></tr>
+</tbody>
+</table>
+
+<p>JMX 属性均为廉价的只读快照，不暴露任何凭据或高基数数据。</p>
+
+<h2>4. 结构化日志</h2>
+
+<p><code>LoggingFilter</code> 在生命周期转换时输出带上下文的日志行，字段包括：
+<code>pool</code>、<code>connectionId</code>、<code>operation</code>、<code>duration</code>、<code>result</code>、<code>exceptionType</code>。</p>
+
+<pre><code>[execute:done] pool=main, connectionId=ftp-000012, operation=EXECUTE, duration=42ms, result=success
+[op:error] operation=UPLOAD, exceptionType=CONNECTION, error=... 
+[borrow:done] pool=main, connectionId=ftp-000012, ...
+</code></pre>
+
+<ul>
+  <li><code>LoggingFilter()</code> 默认只记录关键转换（execute 完成、错误）；<code>LoggingFilter(true)</code> 打开详细 debug 级别。</li>
+  <li><strong>密码永不入日志</strong>：日志上下文根本不会携带凭据。</li>
+</ul>
+
+<h2>5. 慢操作与连接泄漏</h2>
+
+<h3>慢操作</h3>
+
+<p>操作耗时超过 <code>slowOperationThreshold</code>（默认 <code>3s</code>）时，<code>SlowOperationFilter</code> 输出：</p>
+
+<pre><code>Slow operation: pool=main, connectionId=ftp-000012, operation=DOWNLOAD, duration=8123ms
+</code></pre>
+
+<p>同时累加 <code>ftp.operation.slow</code> 计数。</p>
+
+<h3>连接泄漏检测</h3>
+
+<p>连接借出超过 <code>leakDetectionThreshold</code>（默认 <code>30s</code>）未归还，泄漏检测器会告警并打印借出线程与调用栈：</p>
+
+<pre><code>Possible connection leak: pool=main, connectionId=ftp-000012, borrowed by thread=..., stack=...
+</code></pre>
+
+<p>检测<strong>只告警，不强制销毁</strong>。设为 <code>0</code> 或负值可禁用。典型原因是业务代码忘记 <code>release</code>，或没有用 <code>execute()</code> 包住借还。</p>
+
+<h2>6. 扩展过滤链</h2>
+
+<p>可观测性由 <code>FtpFilter</code> SPI 驱动。自定义过滤器通过 <code>FtpPoolBuilder.addFilter(...)</code> 加入，
+或实现 <code>FtpFilterProvider</code> 并注册到 <code>META-INF/services</code>。</p>
+
+<pre><code>pool = FtpPoolBuilder.builder()
+        .host("ftp.example.com")
+        .addFilter(new MyAuditFilter())
+        .build();
+</code></pre>
+
+<p>追踪（OpenTelemetry / Micrometer Tracing）可通过 <code>FtpTracer</code> / <code>TracingFilter</code> SPI 接入。</p>
+
+</main>
+</div>
+
+<footer class="site-footer">
+  TidePool · FtpPool — Apache License 2.0
+</footer>
+
+<script src="assets/site.js"></script>
+</body>
+</html>

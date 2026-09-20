@@ -1,0 +1,83 @@
+# ---------------------------------------------------------------------------
+# Maven / Java build output
+# ---------------------------------------------------------------------------
+target/
+*.class
+.flattened-pom.xml
+dependency-reduced-pom.xml
+pom.xml.versionsBackup
+pom.xml.releaseBackup
+release.properties
+
+# Maven Wrapper download (keep maven-wrapper.properties, ignore the binary jar)
+.mvn/wrapper/maven-wrapper.jar
+
+# ---------------------------------------------------------------------------
+# JVM crash / diagnostic dumps
+# ---------------------------------------------------------------------------
+hs_err_pid*
+replay_pid*
+*.hprof
+*.jfr
+
+# ---------------------------------------------------------------------------
+# IDE - IntelliJ IDEA
+# ---------------------------------------------------------------------------
+.idea/
+*.iml
+*.ipr
+*.iws
+out/
+
+# IDE - Eclipse / VS Code / NetBeans
+.vscode/
+.settings/
+.classpath
+.project
+.factorypath
+.apt_generated/
+bin/
+nbproject/private/
+nbbuild/
+nbdist/
+
+# ---------------------------------------------------------------------------
+# OS
+# ---------------------------------------------------------------------------
+.DS_Store
+._*
+.Spotlight-V100
+.Trashes
+Thumbs.db
+ehthumbs.db
+Desktop.ini
+$RECYCLE.BIN/
+
+# ---------------------------------------------------------------------------
+# Logs / test output / temp
+# ---------------------------------------------------------------------------
+*.log
+*.tmp
+*.bak
+*.swp
+*~
+logs/
+**/surefire-reports/
+**/failsafe-reports/
+**/jmh-result*.json
+
+# ---------------------------------------------------------------------------
+# Local / secrets - never commit
+# ---------------------------------------------------------------------------
+.env
+.env.*
+!.env.example
+*.pem
+*.key
+*.p12
+*.jks
+*.keystore
+local.properties
+application-local.yml
+application-local.yaml
+application-local.properties

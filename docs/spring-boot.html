@@ -1,0 +1,165 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Spring Boot 集成 · TidePool</title>
+<link rel="stylesheet" href="assets/style.css">
+</head>
+<body data-page="spring-boot">
+<header id="site-header"></header>
+
+<div class="layout">
+<aside id="toc"></aside>
+<main class="content">
+
+<h1>Spring Boot 集成</h1>
+
+<p>Starter 面向 Spring Boot 3.x（Java 17+），提供自动配置、<code>spring.tidepool.ftp.*</code> 属性绑定、Actuator 健康检查与条件化 JMX。</p>
+
+<h2>1. 引入 Starter</h2>
+
+<pre><code>&lt;dependency&gt;
+    &lt;groupId&gt;io.ftppool&lt;/groupId&gt;
+    &lt;artifactId&gt;ftp-pool-spring-boot-starter&lt;/artifactId&gt;
+    &lt;version&gt;0.1.0-SNAPSHOT&lt;/version&gt;
+&lt;/dependency&gt;
+</code></pre>
+
+<p>Starter 会传递引入：<code>ftp-pool-adapter</code>、<code>ftp-pool-engine-fast</code>、<code>ftp-pool-observability</code>、
+<code>ftp-pool-micrometer</code>、<code>ftp-pool-jmx</code> 与 Spring Boot starter。使用 <code>commons</code> 引擎时需再显式加入
+<code>ftp-pool-engine-commons</code>。</p>
+
+<h2>2. 最小配置</h2>
+
+<pre><code>spring:
+  tidepool:
+    ftp:
+      host: ftp.example.com
+      port: 21
+      username: user
+      password: ${FTP_PASSWORD}
+</code></pre>
+
+<blockquote class="warn">
+  <p><code>spring.tidepool.ftp.enabled</code> 默认为 <code>true</code>。若开启但未配置 <code>spring.tidepool.ftp.host</code>，应用启动会失败并提示：
+  <code>spring.tidepool.ftp.enabled=true but spring.tidepool.ftp.host is not configured</code>。要禁用请显式设置 <code>spring.tidepool.ftp.enabled=false</code>。</p>
+</blockquote>
+
+<h2>3. 自动配置的 Bean</h2>
+
+<table>
+<thead><tr><th>Bean</th><th>类型</th><th>条件</th></tr></thead>
+<tbody>
+<tr><td><code>ftpPool</code></td><td><code>FtpPool</code></td><td>缺失 <code>FtpPool</code> Bean 时创建；容器关闭时自动 <code>close()</code></td></tr>
+<tr><td><code>ftpClientTemplate</code></td><td><code>FtpClientTemplate</code></td><td>缺失时创建，包装 <code>FtpPool</code></td></tr>
+<tr><td><code>ftpPoolJmxRegistration</code></td><td>JMX 注册器</td><td><code>spring.tidepool.ftp.observability.jmx=true</code>（默认）</td></tr>
+<tr><td><code>ftpPoolHealthIndicator</code></td><td><code>HealthIndicator</code></td><td>classpath 存在 Actuator 且存在 <code>FtpPool</code> Bean</td></tr>
+</tbody>
+</table>
+
+<h2>4. 注入使用</h2>
+
+<pre><code>@Service
+public class ReportService {
+
+    private final FtpClientTemplate ftp;
+
+    public ReportService(FtpClientTemplate ftp) {   // 也可注入 FtpPool
+        this.ftp = ftp;
+    }
+
+    public void upload(InputStream in) throws FtpException {
+        ftp.upload("/data/report.csv", in);
+    }
+
+    public FtpPoolStats stats() {
+        return ftp.stats();
+    }
+}
+</code></pre>
+
+<h2>5. mode 与逐轴覆盖</h2>
+
+<p><code>spring.tidepool.ftp.pool.mode</code> 对应 <code>FtpPoolProfiles</code> 预设（默认 <code>hybrid</code>）：</p>
+
+<pre><code>spring:
+  tidepool:
+    ftp:
+      pool:
+        mode: hybrid          # fast | commons | monitor | hybrid
+        engine: FAST          # 可选：逐轴覆盖，缺省用 mode 预设
+        lifecycle: COMMONS
+        observability: FULL
+</code></pre>
+
+<table>
+<thead><tr><th>mode</th><th>engine</th><th>lifecycle</th><th>observability</th></tr></thead>
+<tbody>
+<tr><td><code>hybrid</code>（默认）</td><td>FAST</td><td>COMMONS</td><td>FULL</td></tr>
+<tr><td><code>fast</code></td><td>FAST</td><td>SIMPLE</td><td>NONE</td></tr>
+<tr><td><code>commons</code></td><td>COMMONS</td><td>COMMONS</td><td>NONE</td></tr>
+<tr><td><code>monitor</code></td><td>FAST</td><td>SIMPLE</td><td>FULL</td></tr>
+</tbody>
+</table>
+
+<h2>6. 可观测性属性</h2>
+
+<pre><code>spring:
+  tidepool:
+    ftp:
+      observability:
+        enabled: true                 # 过滤链总开关
+        metrics: true                 # 存在 MeterRegistry 时接入 Micrometer，否则用内置计数器
+        jmx: true                     # 注册 JMX MBean
+        slow-operation-threshold: 3s  # 慢操作阈值
+</code></pre>
+
+<p>Spring 场景下由容器组装过滤链：<code>MetricsFilter</code>（接入 Micrometer）、审计用 <code>LoggingFilter</code>、<code>SlowOperationFilter</code>。
+当 <code>mode</code> 为 <code>fast</code>/<code>commons</code> 且未显式覆盖 <code>observability</code> 时，过滤链为空。</p>
+
+<p>JMX MBean 对象名：<code>com.ftppool:type=FtpPool,name=&lt;poolName&gt;</code>。
+指标名与 JMX 属性详见 <a href="observability.html">可观测性</a>。</p>
+
+<h2>7. Actuator 健康检查</h2>
+
+<p>存在 Actuator 时，健康端点下会出现 <code>ftpPool</code> 贡献者：</p>
+
+<pre><code>{
+  "status": "UP",
+  "details": {
+    "ftpPool": { "total": 10, "active": 3, "idle": 7, "pending": 0 }
+  }
+}
+</code></pre>
+
+<table>
+<thead><tr><th>状态</th><th>含义</th></tr></thead>
+<tbody>
+<tr><td><code>UP</code></td><td>池可用。惰性空池也是健康的——它按需创建；瞬时打满但没有等待者同样健康。</td></tr>
+<tr><td><code>DEGRADED</code></td><td>当前确有争用：此刻有 borrower 在等待连接（<code>pending &gt; 0</code>）。</td></tr>
+<tr><td><code>DOWN</code></td><td>池已关闭，无法再服务。</td></tr>
+</tbody>
+</table>
+
+<p>健康检查反映<strong>实时</strong>状态，不使用历史累计计数——曾发生过一次 borrow 超时不会让池永久停在 DEGRADED。</p>
+
+<h2>8. 覆盖与定制</h2>
+
+<ul>
+  <li><strong>自定义 Pool：</strong>自行声明 <code>FtpPool</code> Bean 即可接管，自动配置会退让（<code>@ConditionalOnMissingBean</code>）。</li>
+  <li><strong>自定义 TLS：</strong>声明一个 <code>SSLContext</code> Bean，自动配置会将其用于 <code>FtpSslConfig</code>。</li>
+  <li><strong>关闭 JMX：</strong>设置 <code>spring.tidepool.ftp.observability.jmx=false</code>。</li>
+  <li><strong>关闭可观测性：</strong>设置 <code>spring.tidepool.ftp.observability.enabled=false</code>。</li>
+</ul>
+
+</main>
+</div>
+
+<footer class="site-footer">
+  TidePool · FtpPool — Apache License 2.0
+</footer>
+
+<script src="assets/site.js"></script>
+</body>
+</html>

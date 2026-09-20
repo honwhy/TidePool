@@ -1,0 +1,2 @@
+io.ftppool.spring.boot.FtpPoolAutoConfiguration
+io.ftppool.spring.boot.FtpPoolHealthIndicatorAutoConfiguration

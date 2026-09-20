@@ -1,0 +1,224 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>快速开始 · TidePool</title>
+<link rel="stylesheet" href="assets/style.css">
+</head>
+<body data-page="getting-started">
+<header id="site-header"></header>
+
+<div class="layout">
+<aside id="toc"></aside>
+<main class="content">
+
+<h1>快速开始</h1>
+
+<p>目标：从零跑通「引入依赖 → 构建 Pool → 上传/下载文件」。假定环境为 <strong>Java 17+</strong> 与 Maven 或 Gradle。</p>
+
+<h2>1. 环境要求</h2>
+
+<table>
+<thead><tr><th>项</th><th>要求</th></tr></thead>
+<tbody>
+<tr><td>JDK</td><td>17 或更高（项目编译目标 <code>maven.compiler.release=17</code>）</td></tr>
+<tr><td>构建工具</td><td>Maven 3.8+ 或 Gradle 7+</td></tr>
+<tr><td>Spring Boot（可选）</td><td>3.x（使用 starter 时）</td></tr>
+<tr><td>FTP 服务端</td><td>任意标准 FTP/FTPS 服务器（vsftpd、IIS、FileZilla Server、Apache MINA FtpServer 等）</td></tr>
+</tbody>
+</table>
+
+<h2>2. 引入依赖</h2>
+
+<p>FtpPool 采用「核心 + SPI 实现」分层：<code>ftp-pool-core</code> 不直接依赖任何引擎或 FTP 客户端，
+运行时通过 <code>META-INF/services</code> 发现实现。因此<strong>必须把引擎模块和适配器模块放到 classpath</strong>，否则构建 Pool 时会抛异常。</p>
+
+<h3>最小依赖集（Fast 引擎）</h3>
+
+<pre><code>&lt;properties&gt;
+    &lt;ftp-pool.version&gt;0.1.0-SNAPSHOT&lt;/ftp-pool.version&gt;
+&lt;/properties&gt;
+
+&lt;dependencies&gt;
+    &lt;!-- 核心：FtpPool / FtpPoolBuilder / FtpClientTemplate --&gt;
+    &lt;dependency&gt;
+        &lt;groupId&gt;io.ftppool&lt;/groupId&gt;
+        &lt;artifactId&gt;ftp-pool-core&lt;/artifactId&gt;
+        &lt;version&gt;${ftp-pool.version}&lt;/version&gt;
+    &lt;/dependency&gt;
+
+    &lt;!-- 高性能引擎（默认 FAST）--&gt;
+    &lt;dependency&gt;
+        &lt;groupId&gt;io.ftppool&lt;/groupId&gt;
+        &lt;artifactId&gt;ftp-pool-engine-fast&lt;/artifactId&gt;
+        &lt;version&gt;${ftp-pool.version}&lt;/version&gt;
+    &lt;/dependency&gt;
+
+    &lt;!-- Apache Commons Net 适配器：FTP / FTPS --&gt;
+    &lt;dependency&gt;
+        &lt;groupId&gt;io.ftppool&lt;/groupId&gt;
+        &lt;artifactId&gt;ftp-pool-adapter&lt;/artifactId&gt;
+        &lt;version&gt;${ftp-pool.version}&lt;/version&gt;
+    &lt;/dependency&gt;
+&lt;/dependencies&gt;
+</code></pre>
+
+<p>Gradle 等价写法：</p>
+
+<pre><code>def ftpPoolVersion = "0.1.0-SNAPSHOT"
+
+dependencies {
+    implementation "io.ftppool:ftp-pool-core:$ftpPoolVersion"
+    implementation "io.ftppool:ftp-pool-engine-fast:$ftpPoolVersion"
+    implementation "io.ftppool:ftp-pool-adapter:$ftpPoolVersion"
+}
+</code></pre>
+
+<blockquote>
+  <p><code>ftp-pool-core</code> 会传递引入 <code>ftp-pool-api</code>（<code>FtpPool</code> / <code>FtpConnection</code> 等公共类型），无需单独声明。</p>
+</blockquote>
+
+<h3>按需追加的模块</h3>
+
+<table>
+<thead><tr><th>artifact</th><th>何时需要</th></tr></thead>
+<tbody>
+<tr><td><code>ftp-pool-engine-commons</code></td><td>使用 <code>commons()</code> profile 或 <code>engine=COMMONS</code></td></tr>
+<tr><td><code>ftp-pool-observability</code></td><td>需要指标 / 慢操作 / 审计日志过滤链（<code>hybrid()</code>/<code>monitor()</code> 会用到）</td></tr>
+<tr><td><code>ftp-pool-micrometer</code></td><td>对接 Micrometer（Prometheus 等）</td></tr>
+<tr><td><code>ftp-pool-jmx</code></td><td>注册 JMX MBean</td></tr>
+<tr><td><code>ftp-pool-spring-boot-starter</code></td><td>Spring Boot 应用一键接入（已含 adapter + engine-fast + observability + micrometer + jmx）</td></tr>
+</tbody>
+</table>
+
+<blockquote class="warn">
+  <p><strong>生产推荐 <code>hybrid()</code>，请在上面的最小集之外再加 <code>ftp-pool-observability</code>（按需再加 <code>ftp-pool-micrometer</code> / <code>ftp-pool-jmx</code>）。</strong>
+  缺少 <code>ftp-pool-observability</code> 时不会报错，但会打印 <code>No FtpFilterProvider ... on the classpath</code> 警告且没有任何指标。
+  上面的最小依赖集只够支撑 <code>fast()</code> 这类 <code>observability=NONE</code> 的用法。</p>
+</blockquote>
+
+<h2>3. 第一个程序</h2>
+
+<pre><code>import io.ftppool.api.FtpPool;
+import io.ftppool.core.FtpPoolProfiles;
+
+import java.io.InputStream;
+
+public class Demo {
+    public static void main(String[] args) throws Exception {
+        FtpPool pool = FtpPoolProfiles.hybrid()          // 默认推荐
+                .host("ftp.example.com")
+                .port(21)
+                .username("user")
+                .password(System.getenv("FTP_PASSWORD")) // 从环境变量读取，勿硬编码
+                .poolName("main")
+                .build();
+
+        try (pool) {                                     // FtpPool 实现 AutoCloseable
+            try (InputStream in = Demo.class.getResourceAsStream("/report.csv")) {
+                boolean ok = pool.execute(ftp -&gt;
+                        ftp.upload("/upload/report.csv", in));
+                System.out.println("uploaded=" + ok);
+            }
+        }
+    }
+}
+</code></pre>
+
+<p>也可以显式手动借还，适合需要精细控制生命周期的场景：</p>
+
+<pre><code>FtpConnection conn = pool.borrow();                 // 或 pool.borrow(Duration.ofSeconds(2))
+try {
+    FtpFile[] files = conn.listFiles("/data");
+    // ... 业务逻辑 ...
+} finally {
+    pool.release(conn);                             // 必须归还，否则连接泄漏
+}
+</code></pre>
+
+<h2>4. 常用操作</h2>
+
+<p>在 <code>pool.execute(callback)</code> 中拿到 <code>FtpConnection</code> 后，可调用以下方法：</p>
+
+<table>
+<thead><tr><th>操作</th><th>方法</th><th>说明</th></tr></thead>
+<tbody>
+<tr><td>上传</td><td><code>boolean upload(String path, InputStream in)</code></td><td>STOR，返回是否成功</td></tr>
+<tr><td>下载</td><td><code>boolean download(String path, OutputStream out)</code></td><td>RETR</td></tr>
+<tr><td>删除</td><td><code>boolean delete(String path)</code></td><td>DELE</td></tr>
+<tr><td>重命名 / 移动</td><td><code>boolean rename(String from, String to)</code></td><td>RNFR/RNTO</td></tr>
+<tr><td>创建目录</td><td><code>boolean makeDirectory(String path)</code></td><td>MKD</td></tr>
+<tr><td>列目录</td><td><code>FtpFile[] listFiles(String path)</code></td><td>返回与 Commons Net 解耦的 <code>FtpFile</code> 记录</td></tr>
+<tr><td>切换目录</td><td><code>void changeDirectory(String path)</code></td><td>CWD，归还时自动重置</td></tr>
+<tr><td>当前目录</td><td><code>String currentDirectory()</code></td><td>PWD</td></tr>
+<tr><td>流式读取</td><td><code>InputStream retrieveFileStream(String path)</code></td><td>需自行调用 <code>completePendingCommand()</code></td></tr>
+<tr><td>流式写入</td><td><code>OutputStream storeFileStream(String path)</code></td><td>需自行调用 <code>completePendingCommand()</code></td></tr>
+</tbody>
+</table>
+
+<pre><code>FtpFile[] files = pool.execute(ftp -&gt; ftp.listFiles("/data"));
+for (FtpFile f : files) {
+    System.out.printf("%s  %d bytes  dir=%s%n", f.name(), f.size(), f.directory());
+}
+
+pool.execute(ftp -&gt; ftp.rename("/data/a.txt", "/data/archive/a.txt"));
+pool.execute(ftp -&gt; ftp.makeDirectory("/data/archive"));
+</code></pre>
+
+<blockquote>
+  <p><code>rename</code> / <code>makeDirectory</code> 在接口上带默认实现（抛 <code>UnsupportedOperationException</code>），
+  当前 Apache Commons Net 适配器已支持；若接入自定义后端可能不支持。</p>
+</blockquote>
+
+<h2>5. FtpClientTemplate（更薄的门面）</h2>
+
+<p><code>FtpClientTemplate</code> 是 <code>FtpPool</code> 之上的轻封装，常用操作一行调用，Spring Boot 下由 starter 自动注册为 Bean。</p>
+
+<pre><code>FtpClientTemplate ftp = new FtpClientTemplate(pool);
+
+ftp.upload("/data/report.csv", input);       // 返回 boolean
+ftp.download("/data/report.csv", output);    // 返回 boolean
+ftp.delete("/data/report.csv");              // 返回 boolean
+boolean ok = ftp.execute(c -&gt; c.rename("/a.txt", "/b.txt"));
+FtpPoolStats stats = ftp.stats();
+</code></pre>
+
+<h2>6. 连接状态会自动重置</h2>
+
+<p>FTP 连接是<strong>有状态</strong>的（工作目录、文件类型、被动模式、编码、传输状态）。归还时会自动重置为：
+BINARY 文件类型、passive 模式、初始工作目录、<code>UTF-8</code> 编码。</p>
+
+<ul>
+  <li>重置成功 → 回到空闲队列，可再次借出；</li>
+  <li>重置失败 → 标记为 broken 并销毁，<strong>绝不</strong>放回池中。</li>
+</ul>
+
+<p>所以你可以在业务里放心 <code>changeDirectory</code>、切文件类型，归还时会被清理干净。</p>
+
+<h2>7. 关闭</h2>
+
+<pre><code>pool.close();   // 停止借出 → 等待在途操作（shutdown-timeout）→ 关闭空闲 → 关闭活跃 → 停止后台维护
+</code></pre>
+
+<p><code>close()</code> 幂等；Spring 容器关闭时会自动调用。<code>shutdownTimeout</code> 默认 10s，设为 0 表示不等待在途操作。</p>
+
+<h2>下一步</h2>
+
+<ul>
+  <li>调参：<a href="configuration.html">配置参数</a> —— 每个参数的默认值、含义与调优建议。</li>
+  <li>加密传输：<a href="ftps.html">FTPS 指南</a>。</li>
+  <li>接入 Spring：<a href="spring-boot.html">Spring Boot 集成</a>。</li>
+  <li>出问题：<a href="troubleshooting.html">排错建议</a>。</li>
+</ul>
+
+</main>
+</div>
+
+<footer class="site-footer">
+  TidePool · FtpPool — Apache License 2.0
+</footer>
+
+<script src="assets/site.js"></script>
+</body>
+</html>

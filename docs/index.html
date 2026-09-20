@@ -1,0 +1,123 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>TidePool — FtpPool 开发者文档</title>
+<link rel="stylesheet" href="assets/style.css">
+</head>
+<body data-page="index">
+<header id="site-header"></header>
+
+<div class="layout">
+<aside id="toc"></aside>
+<main class="content">
+
+<section class="hero">
+  <h1>TidePool · FtpPool</h1>
+  <p>面向 Java 的高性能、可观测、生产级 FTP/FTPS 连接池。潮起潮落，连接永续。</p>
+  <p>
+    <span class="pill">Java 17+</span>
+    <span class="pill">FTP + FTPS</span>
+    <span class="pill">Spring Boot 3</span>
+    <span class="pill">Apache-2.0</span>
+  </p>
+  <p>工程名 <strong>FtpPool</strong> · 包名 <code>io.ftppool</code> · 依赖坐标 <code>io.ftppool:ftp-pool-*</code></p>
+</section>
+
+<h2>这套文档怎么用</h2>
+
+<p>面向<strong>使用方开发者</strong>，从引入依赖到线上排错，按顺序阅读即可。</p>
+
+<div class="card-grid">
+  <a class="card" href="getting-started.html">
+    <div class="card-title">快速开始</div>
+    <div class="card-desc">引入依赖（Maven / Gradle）、选择模块、5 分钟跑通第一次上传下载。</div>
+  </a>
+  <a class="card" href="configuration.html">
+    <div class="card-title">配置参数</div>
+    <div class="card-desc">连接参数与池参数完整说明、默认值、调优建议、Profile 预设、Spring Boot YAML。</div>
+  </a>
+  <a class="card" href="ftps.html">
+    <div class="card-title">FTPS 指南</div>
+    <div class="card-desc">Explicit / Implicit FTPS、TLS 配置模型与安全底线。</div>
+  </a>
+  <a class="card" href="spring-boot.html">
+    <div class="card-title">Spring Boot 集成</div>
+    <div class="card-desc">Starter、自动配置、属性绑定、Actuator 健康检查与 JMX。</div>
+  </a>
+  <a class="card" href="observability.html">
+    <div class="card-title">可观测性</div>
+    <div class="card-desc">指标、JMX、日志上下文、慢操作与连接泄漏检测。</div>
+  </a>
+  <a class="card" href="troubleshooting.html">
+    <div class="card-title">排错建议</div>
+    <div class="card-desc">异常类型速查、常见现象 → 原因 → 处理，连接问题排查清单。</div>
+  </a>
+</div>
+
+<h2>30 秒示例</h2>
+
+<pre><code>FtpPool pool = FtpPoolProfiles.hybrid()          // 默认推荐：Fast 引擎 + 完整生命周期 + 可观测
+        .host("ftp.example.com")
+        .port(21)
+        .username("user")
+        .password(System.getenv("FTP_PASSWORD")) // 密码绝不写进日志 / 指标 / JMX
+        .build();
+
+try (pool) {
+    boolean ok = pool.execute(ftp -&gt;
+            ftp.upload("/data/report.csv", inputStream));
+}
+</code></pre>
+
+<p>
+  <code>execute()</code> 一行完成 <code>borrow → 执行 → 校验 → 归还</code>；
+  连接类异常自动销毁，业务异常安全回池，无需手工 <code>release</code>。
+</p>
+
+<h2>核心特性</h2>
+
+<table>
+<thead><tr><th>能力</th><th>说明</th></tr></thead>
+<tbody>
+<tr><td>真正的连接池</td><td>借出 / 归还、空闲与最大寿命回收、并发建连节流、优雅关闭 drain。</td></tr>
+<tr><td>有状态连接重置</td><td>归还时重置工作目录、文件类型（BINARY）、被动模式、编码；重置失败即销毁，绝不带脏状态回池。</td></tr>
+<tr><td>FTP + FTPS</td><td>明文 FTP、Explicit FTPS、Implicit FTPS；TLS 校验默认开启，trust-all 必须显式开启且标记不安全。</td></tr>
+<tr><td>三轴可组合</td><td>引擎（Fast / Commons）、生命周期（SIMPLE / COMMONS）、可观测性（NONE / BASIC / FULL）相互独立。</td></tr>
+<tr><td>生产可观测</td><td>逐操作指标与字节数、JMX MBean、Micrometer、慢操作告警、连接泄漏检测、实时健康语义。</td></tr>
+<tr><td>Spring Boot 3</td><td>Starter 自动配置、<code>ftp.*</code> 属性绑定、Actuator 健康检查、条件化 JMX。</td></tr>
+</tbody>
+</table>
+
+<h2>Profile 预设（怎么选）</h2>
+
+<table>
+<thead><tr><th>Profile</th><th>引擎</th><th>生命周期</th><th>可观测性</th><th>适用</th></tr></thead>
+<tbody>
+<tr><td><code>hybrid()</code> <span class="pill">默认</span></td><td>Fast</td><td>COMMONS</td><td>FULL</td><td>生产推荐</td></tr>
+<tr><td><code>fast()</code></td><td>Fast</td><td>SIMPLE</td><td>NONE</td><td>极致低延迟、无后台维护</td></tr>
+<tr><td><code>commons()</code></td><td>Commons</td><td>COMMONS</td><td>NONE</td><td>以 Commons Pool 生命周期为先</td></tr>
+<tr><td><code>monitor()</code></td><td>Fast</td><td>SIMPLE</td><td>FULL</td><td>只想要监控、不要后台维护</td></tr>
+</tbody>
+</table>
+
+<p>入口类：<code>io.ftppool.core.FtpPoolProfiles</code>。也可用 <code>FtpPoolBuilder.builder()</code> 逐轴配置，详见 <a href="configuration.html">配置参数</a>。</p>
+
+<h2>权威规格</h2>
+
+<blockquote>
+  <p>仓库根目录的 <code>requirements.md</code> 是所有设计与 API 决策的唯一准绳，本组文档围绕它展开。
+  版本与变更见 <code>CHANGELOG.md</code>，模块地图见 <code>AGENTS.md</code>。</p>
+</blockquote>
+
+</main>
+</div>
+
+<footer class="site-footer">
+  TidePool · FtpPool — Apache License 2.0 · 文档为 HTML 单源，直接由静态服务器托管
+</footer>
+
+<script src="assets/site.js"></script>
+</body>
+</html>

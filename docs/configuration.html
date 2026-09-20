@@ -1,0 +1,258 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>配置参数 · TidePool</title>
+<link rel="stylesheet" href="assets/style.css">
+</head>
+<body data-page="configuration">
+<header id="site-header"></header>
+
+<div class="layout">
+<aside id="toc"></aside>
+<main class="content">
+
+<h1>配置参数</h1>
+
+<p>配置分三层，互不混淆：</p>
+
+<table>
+<thead><tr><th>层</th><th>承载类型</th><th>内容</th></tr></thead>
+<tbody>
+<tr><td>连接参数</td><td><code>FtpConnectionSettings</code></td><td>host / port / username / password / protocol / encoding / ssl</td></tr>
+<tr><td>池参数</td><td><code>PoolConfiguration</code></td><td>大小、超时、回收、校验、泄漏检测等池机制</td></tr>
+<tr><td>策略轴</td><td><code>PoolEngineType</code> / <code>LifecycleType</code> / <code>ObservabilityType</code></td><td>引擎、生命周期、可观测性</td></tr>
+</tbody>
+</table>
+
+<h2>连接参数</h2>
+
+<p>通过 <code>FtpPoolBuilder</code>（或 Spring Boot 的 <code>spring.tidepool.ftp.*</code>）设置。所有参数在 <code>build()</code> 时汇总为不可变记录 <code>FtpConnectionSettings</code>。</p>
+
+<table>
+<thead><tr><th>参数</th><th>Builder 方法</th><th>默认值</th><th>说明</th></tr></thead>
+<tbody>
+<tr>
+  <td><code>host</code></td>
+  <td><code>host(String)</code></td>
+  <td><strong>必填</strong></td>
+  <td>FTP 服务器主机名或 IP。<code>build()</code> 时为空会抛 <code>NullPointerException</code>。</td>
+</tr>
+<tr>
+  <td><code>port</code></td>
+  <td><code>port(int)</code></td>
+  <td><code>0</code> → 协议默认</td>
+  <td>FTP / FTPS-explicit 默认 <code>21</code>，FTPS-implicit 默认 <code>990</code>。显式传 <code>0</code> 或负值即用协议默认端口。</td>
+</tr>
+<tr>
+  <td><code>username</code></td>
+  <td><code>username(String)</code></td>
+  <td><code>anonymous</code></td>
+  <td>为 <code>null</code> 时按匿名登录处理。</td>
+</tr>
+<tr>
+  <td><code>password</code></td>
+  <td><code>password(String)</code></td>
+  <td><code>""</code></td>
+  <td>为 <code>null</code> 时按空密码处理。密码<strong>绝不</strong>出现在日志、指标、JMX 或异常消息中；<code>FtpConnectionSettings.toString()</code> 会将其掩码为 <code>******</code>。</td>
+</tr>
+<tr>
+  <td><code>protocol</code></td>
+  <td><code>protocol(FtpProtocol)</code></td>
+  <td><code>FTP</code></td>
+  <td><code>FTP</code> / <code>FTPS_EXPLICIT</code> / <code>FTPS_IMPLICIT</code>，决定适配器创建哪种物理客户端。</td>
+</tr>
+<tr>
+  <td><code>encoding</code></td>
+  <td><code>encoding(String)</code></td>
+  <td><code>UTF-8</code></td>
+  <td>控制通道编码。为 <code>null</code> 或空白时回落 <code>UTF-8</code>。</td>
+</tr>
+<tr>
+  <td><code>ssl</code></td>
+  <td><code>sslConnection(FtpSslConfig)</code></td>
+  <td><code>FtpSslConfig.secureDefaults()</code></td>
+  <td>FTPS 的 TLS 策略。默认使用 JVM 信任库并开启 hostname 校验。详见 <a href="ftps.html">FTPS 指南</a>。</td>
+</tr>
+</tbody>
+</table>
+
+<h2>池参数</h2>
+
+<p>通过 <code>FtpPoolBuilder</code> 或 Spring Boot 的 <code>spring.tidepool.ftp.pool.*</code> 设置。下表中的「0 / 负值」语义已按实现标注。</p>
+
+<table>
+<thead><tr><th>参数</th><th>默认值</th><th>说明 / 0 与负值语义</th></tr></thead>
+<tbody>
+<tr><td><code>poolName</code></td><td><code>default</code></td><td>日志、指标、JMX 中的池标识；空或空白时回落 <code>default</code>。</td></tr>
+<tr><td><code>minIdle</code></td><td><code>2</code></td><td>最低空闲连接数，后台回填目标。负值回落默认。必须 <code>&le; maxSize</code>，否则 <code>IllegalArgumentException</code>。</td></tr>
+<tr><td><code>maxSize</code></td><td><code>20</code></td><td>池上限（含借出 + 空闲）。<code>&le; 0</code> 回落默认。</td></tr>
+<tr><td><code>connectionTimeout</code></td><td><code>3s</code></td><td>borrow 等待超时，超时抛 <code>FtpPoolException(POOL_TIMEOUT)</code>。非正值回落默认。</td></tr>
+<tr><td><code>socketTimeout</code></td><td><code>30s</code></td><td>控制连接 socket 读超时。非正值回落默认。</td></tr>
+<tr><td><code>dataTimeout</code></td><td><code>60s</code></td><td>数据连接（传输）超时。非正值回落默认。</td></tr>
+<tr><td><code>idleTimeout</code></td><td><code>5m</code></td><td>空闲超过该时长即被后台驱逐。<strong>0 或负值 = 禁用空闲驱逐。</strong></td></tr>
+<tr><td><code>maxLifetime</code></td><td><code>30m</code></td><td>连接最大寿命，到期在归还/后台回收时销毁，防 NAT / 防火墙静默断连。<strong>必须为正，不可禁用。</strong></td></tr>
+<tr><td><code>validationInterval</code></td><td><code>30s</code></td><td>借出前的校验节流周期：仅当连接空闲超过该间隔才做一次 <code>NOOP</code>；后台 housekeeper 周期同样取该值（最小 1s）。<strong>0 或负值 = 不做借出前校验。</strong></td></tr>
+<tr><td><code>maxCreateConcurrency</code></td><td><code>2</code></td><td>并发建连节流，防止连接风暴 / 认证风暴压垮服务器。<code>&le; 0</code> 回落默认。</td></tr>
+<tr><td><code>leakDetectionThreshold</code></td><td><code>30s</code></td><td>连接借出超过该时长未归还，打印 <code>Possible connection leak</code> 告警（含借出线程与调用栈），<strong>不会强制销毁</strong>。<strong>0 或负值 = 禁用。</strong></td></tr>
+<tr><td><code>slowOperationThreshold</code></td><td><code>3s</code></td><td>操作耗时超过该值记录慢操作事件。非正值回落默认。</td></tr>
+<tr><td><code>shutdownTimeout</code></td><td><code>10s</code></td><td><code>close()</code> 时等待在途操作归还连接的宽限期。<strong>0 = 不等待。</strong></td></tr>
+<tr><td><code>lifecycle</code></td><td><code>COMMONS</code></td><td><code>COMMONS</code> = 启用后台维护（空闲驱逐、寿命回收、周期校验、min-idle 回填）；<code>SIMPLE</code> = 仅启动时预热一次 min-idle，无后台维护。</td></tr>
+</tbody>
+</table>
+
+<blockquote class="warn">
+  <p><strong>校验成本提示：</strong>FTP 的 <code>NOOP</code> 就是一次网络往返。规格明确禁止「每次 borrow 都 NOOP」，
+  因此只有连接空闲超过 <code>validationInterval</code> 才在借出时主动校验；其余情况靠后台 <code>testWhileIdle</code>。</p>
+</blockquote>
+
+<h2>策略轴（engine / lifecycle / observability）</h2>
+
+<table>
+<thead><tr><th>枚举</th><th>取值</th><th>说明</th></tr></thead>
+<tbody>
+<tr><td><code>PoolEngineType</code></td><td><code>FAST</code>、<code>COMMONS</code></td><td>性能算法：CAS fast-path / ThreadLocal 候选 vs. Apache Commons Pool 生命周期对象池。</td></tr>
+<tr><td><code>LifecycleType</code></td><td><code>SIMPLE</code>、<code>COMMONS</code></td><td>后台维护开关。对 Fast 引擎真实生效；Commons 引擎本身即 <code>COMMONS</code> 生命周期。</td></tr>
+<tr><td><code>ObservabilityType</code></td><td><code>NONE</code>、<code>BASIC</code>、<code>FULL</code></td><td>过滤链深度：<code>NONE</code> 无过滤器；<code>BASIC</code>/<code>FULL</code> 经 SPI 查找名为 <code>basic</code>/<code>full</code> 的 provider。</td></tr>
+</tbody>
+</table>
+
+<h2>Profile 预设</h2>
+
+<p>大多数场景直接用预设，无需逐轴配置。入口 <code>io.ftppool.core.FtpPoolProfiles</code>：</p>
+
+<table>
+<thead><tr><th>方法</th><th>engine</th><th>lifecycle</th><th>observability</th><th>适用</th></tr></thead>
+<tbody>
+<tr><td><code>hybrid()</code> <span class="pill">默认</span></td><td>FAST</td><td>COMMONS</td><td>FULL</td><td>生产推荐</td></tr>
+<tr><td><code>fast()</code></td><td>FAST</td><td>SIMPLE</td><td>NONE</td><td>极致低延迟，无后台维护</td></tr>
+<tr><td><code>commons()</code></td><td>COMMONS</td><td>COMMONS</td><td>NONE</td><td>以 Commons Pool 生命周期为先</td></tr>
+<tr><td><code>monitor()</code></td><td>FAST</td><td>SIMPLE</td><td>FULL</td><td>只要监控，不要后台维护</td></tr>
+</tbody>
+</table>
+
+<pre><code>FtpPool pool = FtpPoolProfiles.hybrid()
+        .host("ftp.example.com")
+        .username("user")
+        .password(System.getenv("FTP_PASSWORD"))
+        .build();
+</code></pre>
+
+<h2>FtpPoolBuilder 完整示例</h2>
+
+<pre><code>import io.ftppool.core.*;
+import io.ftppool.api.FtpProtocol;
+
+import java.time.Duration;
+
+FtpPool pool = FtpPoolBuilder.builder()
+        // ---- 连接 ----
+        .host("ftp.example.com")
+        .port(21)
+        .username("user")
+        .password(System.getenv("FTP_PASSWORD"))
+        .protocol(FtpProtocol.FTP)
+        .encoding("UTF-8")
+        // .sslConnection(FtpSslConfig.secureDefaults())   // FTPS 时配置
+
+        // ---- 池 ----
+        .poolName("main")
+        .minIdle(2)
+        .maxSize(20)
+        .connectionTimeout(Duration.ofSeconds(3))
+        .socketTimeout(Duration.ofSeconds(30))
+        .dataTimeout(Duration.ofSeconds(60))
+        .idleTimeout(Duration.ofMinutes(5))
+        .maxLifetime(Duration.ofMinutes(30))
+        .validationInterval(Duration.ofSeconds(30))
+        .maxCreateConcurrency(2)
+        .leakDetectionThreshold(Duration.ofSeconds(30))
+        .slowOperationThreshold(Duration.ofSeconds(3))
+        .shutdownTimeout(Duration.ofSeconds(10))
+
+        // ---- 策略轴 ----
+        .engine(PoolEngineType.FAST)
+        .lifecycle(LifecycleType.COMMONS)
+        .observability(ObservabilityType.FULL)
+
+        // ---- 扩展 ----
+        // .addFilter(myFilter)
+        // .autoRegisterMBeans(false)
+        .build();
+</code></pre>
+
+<blockquote>
+  <p><code>autoRegisterMBeans</code> 默认为 <code>true</code>：<code>build()</code> 时经 <code>ServiceLoader</code> 自动注册 JMX。
+  Spring Boot 自己管理 JMX，会显式关闭它以免重复注册。</p>
+</blockquote>
+
+<h2>Spring Boot YAML 参考</h2>
+
+<pre><code>spring:
+  tidepool:
+    ftp:
+      enabled: true
+      host: ftp.example.com
+      port: 21
+      username: user
+      password: ${FTP_PASSWORD}      # 环境变量注入，绝不硬编码
+      protocol: ftp                  # ftp | ftps-explicit | ftps-implicit
+      encoding: UTF-8
+      pool-name: default
+
+      pool:
+        mode: hybrid                 # fast | commons | monitor | hybrid
+        engine:                      # 可选：逐轴覆盖，缺省用 mode 预设
+        lifecycle:
+        observability:
+        min-idle: 2
+        max-size: 20
+        connection-timeout: 3s
+        socket-timeout: 30s
+        data-timeout: 60s
+        idle-timeout: 5m
+        max-lifetime: 30m
+        validation-interval: 30s
+        max-create-concurrency: 2
+        leak-detection-threshold: 30s
+        shutdown-timeout: 10s
+
+      observability:
+        enabled: true
+        metrics: true
+        jmx: true
+        slow-operation-threshold: 3s
+
+      ssl:                           # FTPS 时使用
+        trust-all: false             # UNSAFE，仅开发/测试
+        hostname-verification: true
+</code></pre>
+
+<p>Duration 采用 Spring Boot 宽松绑定（<code>3s</code> / <code>5m</code> / <code>500ms</code> …）。属性类为
+<code>io.ftppool.spring.boot.FtpPoolProperties</code>（prefix <code>spring.tidepool.ftp</code>），详见 <a href="spring-boot.html">Spring Boot 集成</a>。</p>
+
+<h2>调优速查</h2>
+
+<table>
+<thead><tr><th>场景</th><th>建议</th></tr></thead>
+<tbody>
+<tr><td>borrow 频繁超时</td><td>先看 <code>stats().pending()</code> 与 <code>borrowTimeouts</code>；增大 <code>maxSize</code> 或缩短单次操作耗时，再考虑放宽 <code>connectionTimeout</code>。</td></tr>
+<tr><td>连接被服务器静默断开</td><td>调小 <code>maxLifetime</code>（如 <code>5m</code>）与 <code>idleTimeout</code>，让连接在被防火墙切断前回收。</td></tr>
+<tr><td>不想有后台线程</td><td>用 <code>fast()</code> 或 <code>lifecycle(SIMPLE)</code>，并设 <code>validationInterval(0)</code>。</td></tr>
+<tr><td>连接风暴 / 认证失败频发</td><td>降低 <code>maxCreateConcurrency</code>（默认 2）并适当预热 <code>minIdle</code>。</td></tr>
+<tr><td>疑似连接泄漏</td><td>保持 <code>leakDetectionThreshold</code> 开启，日志会给出借出线程与调用栈。</td></tr>
+<tr><td>慢操作影响业务</td><td>调小 <code>slowOperationThreshold</code>，结合指标定位是哪类操作慢。</td></tr>
+</tbody>
+</table>
+
+</main>
+</div>
+
+<footer class="site-footer">
+  TidePool · FtpPool — Apache License 2.0
+</footer>
+
+<script src="assets/site.js"></script>
+</body>
+</html>

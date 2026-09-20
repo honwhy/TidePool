@@ -1,0 +1,153 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>FTPS 指南 · TidePool</title>
+<link rel="stylesheet" href="assets/style.css">
+</head>
+<body data-page="ftps">
+<header id="site-header"></header>
+
+<div class="layout">
+<aside id="toc"></aside>
+<main class="content">
+
+<h1>FTPS 指南</h1>
+
+<p>FTPS = FTP over TLS。上层 API 与明文 FTP 完全一致，只是 <code>protocol</code> 与 TLS 配置不同。
+适配器在底层创建对应的 <code>FTPSClient</code>，用户不会接触任何 Apache Commons Net 类型。</p>
+
+<h2>1. 选择协议</h2>
+
+<table>
+<thead><tr><th><code>FtpProtocol</code></th><th>默认端口</th><th>说明</th></tr></thead>
+<tbody>
+<tr><td><code>FTP</code></td><td>21</td><td>明文 FTP</td></tr>
+<tr><td><code>FTPS_EXPLICIT</code></td><td>21</td><td>控制通道先明文连接，再 <code>AUTH TLS</code> 升级；最常用</td></tr>
+<tr><td><code>FTPS_IMPLICIT</code></td><td>990</td><td>连接即 TLS，无需协商</td></tr>
+</tbody>
+</table>
+
+<p><code>port=0</code>（或不设置）时使用协议默认端口。</p>
+
+<h2>2. 最小配置（Explicit，推荐）</h2>
+
+<pre><code>import io.ftppool.api.FtpProtocol;
+import io.ftppool.core.FtpPoolProfiles;
+import io.ftppool.core.FtpSslConfig;
+
+FtpPool pool = FtpPoolProfiles.hybrid()
+        .host("ftps.example.com")
+        .protocol(FtpProtocol.FTPS_EXPLICIT)
+        .sslConnection(FtpSslConfig.secureDefaults())   // 企业证书链 → JVM 默认信任库
+        .username("user")
+        .password(System.getenv("FTP_PASSWORD"))
+        .build();
+</code></pre>
+
+<p><code>FtpSslConfig.secureDefaults()</code> 的含义：使用 JVM 默认信任库、<strong>开启 hostname 校验</strong>、不信任任意证书。</p>
+
+<h2>3. TLS 配置模型</h2>
+
+<pre><code>public record FtpSslConfig(
+        SSLContext sslContext,      // 显式上下文，优先级最高
+        TrustManager[] trustManagers,
+        KeyManager[] keyManagers,   // 客户端证书（双向 TLS）
+        boolean trustAll,           // UNSAFE
+        boolean hostnameVerification)
+</code></pre>
+
+<p>构建安全上下文时的优先级：</p>
+
+<pre><code>显式 sslContext
+   ↓ 未提供
+trustManagers / keyManagers 组装新的 TLS context
+   ↓ 未提供
+JVM 默认上下文（默认信任库）
+</code></pre>
+
+<h3>自定义信任链 / 客户端证书（双向 TLS）</h3>
+
+<pre><code>SSLContext ctx = SSLContext.getInstance("TLS");
+ctx.init(keyManagers, trustManagers, null);
+
+FtpSslConfig config = new FtpSslConfig(ctx, null, null, false, true);
+// 或流式：FtpSslConfig.secureDefaults().withSslContext(ctx)
+</code></pre>
+
+<blockquote>
+  <p><code>FtpSslConfig</code> 只使用 JDK 的 <code>javax.net.ssl.*</code> 类型，因此 <code>ftp-pool-core</code> 仍保持无第三方依赖。</p>
+</blockquote>
+
+<h2>4. 安全底线（不可谈判）</h2>
+
+<blockquote class="danger">
+  <p><strong>TLS 校验不允许默认关闭。</strong>唯一能跳过校验的方式是显式命名的 <code>FtpSslConfig.insecureTrustAll()</code>，
+  它会同时跳过证书校验与 hostname 校验，<strong>仅限本地开发与测试服务器</strong>。</p>
+</blockquote>
+
+<pre><code>// UNSAFE —— 开发/测试专用
+.sslConnection(FtpSslConfig.insecureTrustAll())
+</code></pre>
+
+<p>适配器应用 trust-all 时会打印醒目告警：</p>
+
+<pre><code>FTPS trust-all enabled — server certificate AND hostname verification disabled. DEVELOPMENT ONLY.
+</code></pre>
+
+<p>生产环境永远使用 <code>secureDefaults()</code> 或其派生的自定义信任配置。</p>
+
+<h2>5. Spring Boot 配置</h2>
+
+<pre><code>spring:
+  tidepool:
+    ftp:
+      protocol: ftps-explicit         # ftp | ftps-explicit | ftps-implicit
+      host: ftps.example.com
+      port: 21
+      username: user
+      password: ${FTP_PASSWORD}
+      ssl:
+        trust-all: false              # UNSAFE，开发/测试专用
+        hostname-verification: true
+</code></pre>
+
+<p>若容器中存在自定义 <code>SSLContext</code> Bean，自动配置会将其注入 <code>FtpSslConfig</code>（优先级最高）。
+设置 <code>spring.tidepool.ftp.ssl.trust-all=true</code> 会覆盖它并打印 UNSAFE 告警。</p>
+
+<h2>6. FTPS 特有行为</h2>
+
+<ul>
+  <li><strong>数据通道保护：</strong>适配器对 FTPS 强制要求受保护的数据信道（Data Channel Protection），
+      未满足视为 broken 连接并销毁，而不是回池。</li>
+  <li><strong>建连顺序：</strong><code>connect → TLS 协商 → login → BINARY → passive → 数据保护 → 记录初始目录</code>；
+      任一步失败即销毁并抛出分类后的 <code>FtpException</code>（<code>CONNECTION</code> / <code>AUTHENTICATION</code> 等）。</li>
+  <li><strong>已端到端验证：</strong>Explicit 与 Implicit FTPS 均通过内嵌 Apache MINA FTPS 服务器的集成测试。</li>
+</ul>
+
+<h2>7. 排查清单</h2>
+
+<table>
+<thead><tr><th>现象</th><th>检查</th></tr></thead>
+<tbody>
+<tr><td>证书验证失败</td><td>服务器证书是否被 JVM 信任库信任；若是公司 / 私有 CA，配置自定义 <code>trustManagers</code>。</td></tr>
+<tr><td>hostname 不匹配</td><td>确认服务器证书的 CN/SAN 与 <code>host</code> 一致。这是预期失败，<strong>不要</strong>用 trust-all 绕过。</td></tr>
+<tr><td>双向 TLS 失败</td><td>是否配置了 <code>keyManagers</code>（客户端证书与私钥）。</td></tr>
+<tr><td>连上后传输失败</td><td>数据连接保护是否开启；防火墙是否放行被动模式的数据端口（PASV）。</td></tr>
+<tr><td>对接测试服务器</td><td>临时使用 <code>insecureTrustAll()</code>，且只限本地环境；上线前务必换回安全配置。</td></tr>
+</tbody>
+</table>
+
+<p>更多连接类问题见 <a href="troubleshooting.html">排错建议</a>。</p>
+
+</main>
+</div>
+
+<footer class="site-footer">
+  TidePool · FtpPool — Apache License 2.0
+</footer>
+
+<script src="assets/site.js"></script>
+</body>
+</html>
